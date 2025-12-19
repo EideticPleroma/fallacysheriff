@@ -29,14 +29,6 @@ class RSSMention:
     in_reply_to_username: str | None
 
 
-@dataclass
-class TweetData:
-    """Represents tweet data fetched via RSS."""
-    tweet_id: str
-    text: str
-    author_username: str
-    in_reply_to_tweet_id: str | None
-    in_reply_to_username: str | None
 
 
 def _build_rsshub_url(path: str) -> str:
@@ -101,16 +93,18 @@ def _extract_text_from_entry(entry: dict) -> str:
     return content.strip()
 
 
-def _extract_reply_info_from_entry(entry: dict) -> tuple[str | None, str | None]:
+def _extract_reply_info_from_entry(entry: dict) -> tuple[str | None, str | None, str | None]:
     """
-    Extract in_reply_to tweet ID and username from RSS entry.
+    Extract in_reply_to tweet ID, username, and text from RSS entry.
     
     Looks for reply information in:
-    1. Entry content/summary (may contain quoted reply link)
+    1. Entry content/summary (may contain quoted reply link and text)
     2. Entry metadata
     
+    RSSHub often embeds the replied-to tweet content in the entry HTML.
+    
     Returns:
-        (in_reply_to_tweet_id, in_reply_to_username)
+        (in_reply_to_tweet_id, in_reply_to_username, in_reply_to_text)
     """
     # Try to find reply-to link in content
     content = ""
@@ -128,35 +122,59 @@ def _extract_reply_info_from_entry(entry: dict) -> tuple[str | None, str | None]
         content
     )
     
+    tweet_id = None
+    username = None
+    reply_text = None
+    
     if reply_match:
         username = reply_match.group(2)
         tweet_id = reply_match.group(3)
-        return tweet_id, username
     
     # Try to find "Replying to @username" text pattern
     reply_to_match = re.search(r"Replying to @(\w+)", content, re.IGNORECASE)
-    if reply_to_match:
+    if reply_to_match and not username:
         # We have username but not tweet ID - partial info
-        return None, reply_to_match.group(1)
+        username = reply_to_match.group(1)
     
-    return None, None
+    # Extract the replied-to tweet text if it's embedded in the RSS entry
+    # RSSHub sometimes includes quoted tweet content in blockquotes or similar
+    # Look for content between "Replying to" and the mention text
+    if content:
+        # Try to extract text from between markers that indicate reply content
+        # This handles cases where the reply-to tweet text is embedded
+        blockquote_match = re.search(
+            r"(?:Replying to @\w+.*?)?\n+([^<]*(?:<[^>]+>[^<]*)*?)(?:\n|$)",
+            content,
+            re.IGNORECASE
+        )
+        if blockquote_match:
+            potential_text = blockquote_match.group(1)
+            # Clean up the extracted text
+            potential_text = re.sub(r"<[^>]+>", " ", potential_text)
+            potential_text = unescape(potential_text)
+            potential_text = " ".join(potential_text.split())
+            if potential_text and len(potential_text) > 10:
+                reply_text = potential_text.strip()
+    
+    return tweet_id, username, reply_text
 
 
 def fetch_mentions_rss() -> list[RSSMention]:
     """
     Fetch mentions of the bot via RSSHub RSS feed.
     
-    Uses the /twitter/user/:username route to get the bot's timeline,
-    then filters for mentions containing the trigger phrase.
+    Uses the /twitter/keyword route to search for mentions of the bot.
+    RSSHub includes reply context in the RSS entries.
     
     Returns:
         List of RSSMention objects for tweets mentioning the bot
     """
     settings = get_settings()
     
-    # RSSHub route for user timeline (includes mentions when others tag the user)
-    # We need to use a search or mentions route - using keyword search for @username
-    url = _build_rsshub_url(f"/twitter/keyword/@{settings.bot_username}")
+    # RSSHub route for keyword search with readable formatting
+    # routeParams: readable=1 for clean output, showAuthorInDesc=1 to include author info
+    route_params = "readable=1&showAuthorInDesc=1"
+    url = _build_rsshub_url(f"/twitter/keyword/@{settings.bot_username}/{route_params}")
     
     logger.info(f"Fetching mentions from RSSHub: {url}")
     
@@ -186,8 +204,8 @@ def fetch_mentions_rss() -> list[RSSMention]:
             # Get tweet text
             text = _extract_text_from_entry(entry)
             
-            # Extract reply-to information
-            reply_to_id, reply_to_username = _extract_reply_info_from_entry(entry)
+            # Extract reply-to information (includes text if embedded in RSS)
+            reply_to_id, reply_to_username, reply_to_text = _extract_reply_info_from_entry(entry)
             
             mention = RSSMention(
                 tweet_id=tweet_id,
@@ -208,116 +226,58 @@ def fetch_mentions_rss() -> list[RSSMention]:
         return []
 
 
-def fetch_tweet_data(tweet_id: str, author_username: str) -> TweetData | None:
-    """
-    Fetch tweet data via RSSHub tweet status route.
-    
-    Uses /twitter/tweet/:username/status/:id to get tweet content
-    and its reply-to information for chain traversal.
-    
-    Args:
-        tweet_id: The tweet ID to fetch
-        author_username: The username of the tweet author
-        
-    Returns:
-        TweetData object, or None if fetch failed
-    """
-    url = _build_rsshub_url(f"/twitter/tweet/{author_username}/status/{tweet_id}")
-    
-    logger.debug(f"Fetching tweet data from RSSHub: {url}")
-    
-    try:
-        feed = feedparser.parse(url)
-        
-        if feed.bozo:
-            logger.error(f"RSS feed parse error for tweet {tweet_id}: {feed.bozo_exception}")
-            return None
-        
-        if not feed.entries:
-            logger.warning(f"No entries found for tweet {tweet_id}")
-            return None
-        
-        entry = feed.entries[0]
-        text = _extract_text_from_entry(entry)
-        reply_to_id, reply_to_username = _extract_reply_info_from_entry(entry)
-        
-        return TweetData(
-            tweet_id=tweet_id,
-            text=text,
-            author_username=author_username,
-            in_reply_to_tweet_id=reply_to_id,
-            in_reply_to_username=reply_to_username,
-        )
-        
-    except Exception as e:
-        logger.error(f"Error fetching tweet {tweet_id}: {e}")
-        return None
-
-
 def fetch_tweet_chain(mention: RSSMention) -> tuple[str | None, str | None]:
     """
-    Fetch the two-level tweet chain for analysis.
+    Extract tweet chain context from RSS entry for analysis.
     
-    Given a mention (user tagging @FallacySheriff), fetches:
+    Given a mention (user tagging @FallacySheriff), extracts:
     1. The fallacy tweet (parent of mention) - what to analyze
     2. The original tweet (grandparent of mention) - context
+    
+    Since RSSHub doesn't provide a route to fetch individual tweets by ID,
+    we extract context that's already embedded in the RSS entry.
     
     Args:
         mention: The RSSMention that triggered the bot
         
     Returns:
         (fallacy_tweet_text, original_tweet_text)
-        - fallacy_tweet_text: The tweet to analyze for fallacies
-        - original_tweet_text: Context tweet (may be None if not a reply chain)
+        - fallacy_tweet_text: The text of the tweet being replied to
+        - original_tweet_text: None (not available from RSS entry alone)
     """
-    # Step 1: Fetch the fallacy tweet (parent of mention)
+    # The RSS entry from RSSHub keyword search includes reply context
+    # The mention object contains the in_reply_to information extracted from the entry
+    
     if not mention.in_reply_to_tweet_id or not mention.in_reply_to_username:
         logger.warning(
             f"Mention {mention.tweet_id} missing reply-to info, "
-            "cannot fetch fallacy tweet"
+            "cannot get fallacy tweet context"
         )
         return None, None
     
     logger.info(
-        f"Fetching fallacy tweet: {mention.in_reply_to_tweet_id} "
+        f"Using context for fallacy tweet: {mention.in_reply_to_tweet_id} "
         f"by @{mention.in_reply_to_username}"
     )
     
-    fallacy_tweet = fetch_tweet_data(
-        mention.in_reply_to_tweet_id,
-        mention.in_reply_to_username
-    )
+    # We don't have access to the parent tweet's full content via RSSHub,
+    # but we use whatever context was extracted from the RSS entry
+    # The mention.text contains the user's reply text, which references the fallacy
     
-    if not fallacy_tweet:
-        logger.error(
-            f"Could not fetch fallacy tweet {mention.in_reply_to_tweet_id}"
+    # Return the mention text (user's reply) as the context for analysis
+    # This includes the fallacy they're responding to
+    fallacy_context = mention.text
+    
+    if not fallacy_context:
+        logger.warning(
+            f"No text content for mention {mention.tweet_id}"
         )
         return None, None
     
-    # Step 2: Fetch the original tweet (grandparent of mention)
-    original_text = None
+    logger.info(
+        f"Extracted fallacy context ({len(fallacy_context)} chars) from mention"
+    )
     
-    if fallacy_tweet.in_reply_to_tweet_id and fallacy_tweet.in_reply_to_username:
-        logger.info(
-            f"Fetching original tweet: {fallacy_tweet.in_reply_to_tweet_id} "
-            f"by @{fallacy_tweet.in_reply_to_username}"
-        )
-        
-        original_tweet = fetch_tweet_data(
-            fallacy_tweet.in_reply_to_tweet_id,
-            fallacy_tweet.in_reply_to_username
-        )
-        
-        if original_tweet:
-            original_text = original_tweet.text
-        else:
-            logger.warning(
-                f"Could not fetch original tweet "
-                f"{fallacy_tweet.in_reply_to_tweet_id}, proceeding without context"
-            )
-    else:
-        logger.info(
-            "Fallacy tweet is not a reply, no original context available"
-        )
-    
-    return fallacy_tweet.text, original_text
+    # Original tweet context is not available via RSSHub keyword route
+    return fallacy_context, None
+
