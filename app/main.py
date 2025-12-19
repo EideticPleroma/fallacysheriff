@@ -205,9 +205,9 @@ async def lifespan(app: FastAPI):
     )
     scheduler.start()
 
-    # Run initial poll on startup
-    logger.info("Running initial poll...")
-    await poll_mentions()
+    # Don't run initial poll during startup - it can block healthcheck
+    # The scheduler will run the first poll after the interval
+    # Or users can trigger /poll manually if needed immediately
 
     logger.info("FallacySheriff bot started (RSS mode)")
     yield
