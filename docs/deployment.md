@@ -7,18 +7,20 @@ Deploy FallacySheriff to Railway for 24/7 operation.
 - Completed [Setup Guide](setup.md)
 - GitHub account with repository
 - Railway account (free tier works for hosting)
-- RSSHub instance (self-hosted or public)
+- X/Twitter API credentials (Free tier - for posting replies)
+- RSSHub instance (self-hosted or public - for reading mentions)
 
 ## Cost Summary
 
 | Service | Cost |
 |---------|------|
+| X API (Free tier) | Free (for posting replies) |
 | FallacySheriff bot hosting | Free tier (500 hours/month) |
 | RSSHub hosting (self-hosted on Railway) | Free tier (included) |
 | Grok API | Usage-based (typically low) |
 | **Total** | Free to ~$10/month |
 
-**Note**: No X API subscription required. RSSHub eliminates the $200/month X API cost entirely.
+**Note**: RSSHub handles reading mentions (free), while the X API Free tier handles posting replies. This avoids the $200/month X API Basic tier.
 
 ## 1. Prepare Repository
 
@@ -86,11 +88,28 @@ In Railway dashboard:
 2. Go to "Variables" tab
 3. Add each variable:
 
+#### X API Credentials (for posting replies)
+
+| Variable | Value |
+|----------|-------|
+| `TWITTER_CONSUMER_KEY` | Your API Key |
+| `TWITTER_CONSUMER_SECRET` | Your API Secret |
+| `TWITTER_ACCESS_TOKEN` | Your Access Token |
+| `TWITTER_ACCESS_TOKEN_SECRET` | Your Access Token Secret |
+| `TWITTER_BEARER_TOKEN` | Your Bearer Token |
+
+#### RSSHub Configuration (for reading mentions)
+
 | Variable | Value |
 |----------|-------|
 | `RSSHUB_URL` | `http://rsshub.railway.internal:1200` |
 | `RSSHUB_ACCESS_KEY` | (leave empty unless you have a custom key) |
-| `TWITTER_AUTH_TOKEN` | Your Twitter auth token |
+| `TWITTER_AUTH_TOKEN` | Your Twitter auth token (from browser cookies) |
+
+#### Bot Configuration
+
+| Variable | Value |
+|----------|-------|
 | `BOT_USERNAME` | `FallacySheriff` (or your bot's username) |
 | `GROK_API_KEY` | Your Grok API Key |
 | `POLL_INTERVAL_MINUTES` | `5` or `10` |
@@ -194,9 +213,18 @@ railway login
 # Link to project
 railway link
 
-# Set variables
+# Set X API variables (for posting)
+railway variables set TWITTER_CONSUMER_KEY=your_api_key
+railway variables set TWITTER_CONSUMER_SECRET=your_api_secret
+railway variables set TWITTER_ACCESS_TOKEN=your_access_token
+railway variables set TWITTER_ACCESS_TOKEN_SECRET=your_access_token_secret
+railway variables set TWITTER_BEARER_TOKEN=your_bearer_token
+
+# Set RSSHub variables (for reading)
 railway variables set RSSHUB_URL=http://rsshub.railway.internal:1200
-railway variables set TWITTER_AUTH_TOKEN=your_token
+railway variables set TWITTER_AUTH_TOKEN=your_auth_token
+
+# Set bot config
 railway variables set BOT_USERNAME=FallacySheriff
 railway variables set GROK_API_KEY=your_grok_key
 railway variables set POLL_INTERVAL_MINUTES=5

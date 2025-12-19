@@ -285,15 +285,34 @@ View logs in Railway dashboard or local terminal.
 
 ### Environment Variables
 
+#### X API (for Posting Replies)
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `TWITTER_CONSUMER_KEY` | Yes | - | API Key from X Developer Portal |
+| `TWITTER_CONSUMER_SECRET` | Yes | - | API Secret from X Developer Portal |
+| `TWITTER_ACCESS_TOKEN` | Yes | - | Access Token from X Developer Portal |
+| `TWITTER_ACCESS_TOKEN_SECRET` | Yes | - | Access Token Secret from X Developer Portal |
+| `TWITTER_BEARER_TOKEN` | Yes | - | Bearer Token from X Developer Portal |
+
+#### RSSHub (for Reading Mentions)
+
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
 | `RSSHUB_URL` | Yes | - | URL of RSSHub instance |
 | `RSSHUB_ACCESS_KEY` | No | - | Optional access key for RSSHub |
-| `TWITTER_AUTH_TOKEN` | Yes | - | Twitter auth token for RSSHub |
+| `TWITTER_AUTH_TOKEN` | Yes* | - | Twitter auth token (cookie) for RSSHub |
+
+#### Bot Configuration
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
 | `BOT_USERNAME` | Yes | - | Bot's Twitter username |
 | `GROK_API_KEY` | Yes | - | Grok API key from x.ai |
 | `POLL_INTERVAL_MINUTES` | No | 5 | Poll interval in minutes |
 | `DATABASE_PATH` | No | data/tweets.db | SQLite database path |
+
+*Or use `TWITTER_USERNAME`/`TWITTER_PASSWORD` for RSSHub authentication
 
 ---
 

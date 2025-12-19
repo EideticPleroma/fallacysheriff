@@ -28,8 +28,9 @@ FallacySheriff: "Bandwagon + Hyperbole
 ## Requirements
 
 - Python 3.11+
+- X/Twitter API credentials (Free tier - for posting replies)
 - Grok API access from x.ai
-- RSSHub instance (self-hosted or public, for Twitter/X data via RSS)
+- RSSHub instance (self-hosted or public, for reading Twitter/X mentions via RSS)
 
 ## Quick Start
 
@@ -52,9 +53,10 @@ cp .env.example .env
 ```
 
 Required credentials:
+- X/Twitter API keys from [developer.twitter.com](https://developer.twitter.com) (Free tier - for posting)
 - Grok API key from [console.x.ai](https://console.x.ai)
-- RSSHub URL and optional access key (if using private RSSHub instance)
-- Twitter/X authentication token for RSSHub (to access Twitter mentions)
+- RSSHub URL (for reading mentions via RSS)
+- Twitter/X authentication token for RSSHub (to access Twitter data)
 
 ### 3. Run Locally
 
@@ -128,24 +130,25 @@ fallacysheriff/
 
 ## Architecture
 
-The bot uses a **RSS-based polling architecture**:
+The bot uses a **hybrid RSS + API architecture**:
 
 1. APScheduler runs in the background
 2. Every 5 minutes, it fetches mentions via RSSHub's `/twitter/keyword` RSS feed
-3. RSSHub converts Twitter/X mentions to RSS, providing context without API limits
+3. RSSHub converts Twitter/X mentions to RSS, bypassing expensive API read limits
 4. Mentions with the trigger phrase are processed
 5. Tweet chain context is extracted from RSS entry content
 6. Parent tweet text is analyzed using Grok
-7. Replies are posted
+7. Replies are posted via X/Twitter API (Free tier)
 
-This approach **bypasses X API read restrictions** by using RSSHub as a universal RSS converter, eliminating the need for expensive API tiers.
+This approach **bypasses X API read restrictions** by using RSSHub for reading, while still using the free X API tier for posting replies.
 
 ## Tech Stack
 
 - **FastAPI** - Web framework
 - **APScheduler** - Background polling
 - **feedparser** - RSS feed parsing
-- **RSSHub** - Universal RSS converter for Twitter/X
+- **RSSHub** - Universal RSS converter for Twitter/X (reading mentions)
+- **Tweepy** - Twitter API v2 client (posting replies)
 - **OpenAI SDK** - Grok API (OpenAI-compatible)
 - **SQLite** - State tracking and deduplication
 - **Railway** - Deployment platform
@@ -154,13 +157,13 @@ This approach **bypasses X API read restrictions** by using RSSHub as a universa
 
 | Service | Monthly Cost |
 |---------|--------------|
-| X API | Free (RSS-based, no API tier needed) |
+| X API (Free tier) | Free (posting only) |
 | Railway hosting | Free |
 | RSSHub hosting | Free (self-hosted) or varies (paid) |
 | Grok API | ~$0-10 (usage-based) |
 | **Total** | ~$0-10/month |
 
-**Note**: By using RSSHub instead of X's paid API tiers, FallacySheriff eliminates the $200/month X API cost.
+**Note**: By using RSSHub for reading mentions instead of X's paid API tiers, FallacySheriff avoids the $200/month X API Basic tier cost. The Free tier is sufficient for posting replies.
 
 ## Contributing
 
