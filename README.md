@@ -28,8 +28,8 @@ FallacySheriff: "Bandwagon + Hyperbole
 ## Requirements
 
 - Python 3.11+
-- X Developer account with **Basic** tier ($200/month)
 - Grok API access from x.ai
+- RSSHub instance (self-hosted or public, for Twitter/X data via RSS)
 
 ## Quick Start
 
@@ -52,9 +52,9 @@ cp .env.example .env
 ```
 
 Required credentials:
-- X/Twitter API keys from [developer.twitter.com](https://developer.twitter.com)
-- Bot User ID (numeric ID of your bot account)
 - Grok API key from [console.x.ai](https://console.x.ai)
+- RSSHub URL and optional access key (if using private RSSHub instance)
+- Twitter/X authentication token for RSSHub (to access Twitter mentions)
 
 ### 3. Run Locally
 
@@ -91,11 +91,13 @@ fallacysheriff/
 │   ├── config.py         # Environment configuration
 │   ├── database.py       # SQLite for tracking and state
 │   ├── grok_client.py    # Grok API integration
-│   └── twitter_client.py # Twitter API integration
+│   ├── rss_client.py     # RSSHub RSS feed integration
+│   └── twitter_client.py # X/Twitter client (legacy)
 ├── tests/
 │   ├── conftest.py       # Test fixtures
 │   ├── test_polling.py   # Polling and endpoint tests
 │   ├── test_grok.py
+│   ├── test_rss.py       # RSS parsing tests
 │   └── test_database.py
 ├── docs/
 │   ├── setup.md          # Setup guide
@@ -126,33 +128,39 @@ fallacysheriff/
 
 ## Architecture
 
-The bot uses a **polling-based architecture**:
+The bot uses a **RSS-based polling architecture**:
 
 1. APScheduler runs in the background
-2. Every 5 minutes, it fetches new mentions via `GET /2/users/:id/mentions`
-3. Mentions with the trigger phrase are processed
-4. Parent tweets are analyzed using Grok
-5. Replies are posted
+2. Every 5 minutes, it fetches mentions via RSSHub's `/twitter/keyword` RSS feed
+3. RSSHub converts Twitter/X mentions to RSS, providing context without API limits
+4. Mentions with the trigger phrase are processed
+5. Tweet chain context is extracted from RSS entry content
+6. Parent tweet text is analyzed using Grok
+7. Replies are posted
 
-This approach works with X's Basic tier ($200/month) - no webhook registration required.
+This approach **bypasses X API read restrictions** by using RSSHub as a universal RSS converter, eliminating the need for expensive API tiers.
 
 ## Tech Stack
 
 - **FastAPI** - Web framework
 - **APScheduler** - Background polling
-- **Tweepy** - Twitter API v2 client
+- **feedparser** - RSS feed parsing
+- **RSSHub** - Universal RSS converter for Twitter/X
 - **OpenAI SDK** - Grok API (OpenAI-compatible)
-- **SQLite** - State tracking
+- **SQLite** - State tracking and deduplication
 - **Railway** - Deployment platform
 
 ## Cost
 
 | Service | Monthly Cost |
 |---------|--------------|
-| X API Basic tier | $200 |
+| X API | Free (RSS-based, no API tier needed) |
 | Railway hosting | Free |
+| RSSHub hosting | Free (self-hosted) or varies (paid) |
 | Grok API | ~$0-10 (usage-based) |
-| **Total** | ~$200/month |
+| **Total** | ~$0-10/month |
+
+**Note**: By using RSSHub instead of X's paid API tiers, FallacySheriff eliminates the $200/month X API cost.
 
 ## Contributing
 
@@ -171,4 +179,5 @@ MIT License - see [LICENSE](LICENSE) for details.
 
 - [Your Logical Fallacy Is](https://yourlogicalfallacyis.com/) - Fallacy reference
 - [Grok](https://x.ai/) - AI analysis
+- [RSSHub](https://docs.rsshub.app/) - Universal RSS converter
 - [Railway](https://railway.app/) - Hosting

@@ -7,16 +7,18 @@ Deploy FallacySheriff to Railway for 24/7 operation.
 - Completed [Setup Guide](setup.md)
 - GitHub account with repository
 - Railway account (free tier works for hosting)
-- X Basic tier subscription ($200/month) for API access
+- RSSHub instance (self-hosted or public)
 
 ## Cost Summary
 
 | Service | Cost |
 |---------|------|
-| X API Basic tier | $200/month |
-| Railway hosting | Free tier (500 hours/month) |
+| FallacySheriff bot hosting | Free tier (500 hours/month) |
+| RSSHub hosting (self-hosted on Railway) | Free tier (included) |
 | Grok API | Usage-based (typically low) |
-| **Total** | ~$200/month |
+| **Total** | Free to ~$10/month |
+
+**Note**: No X API subscription required. RSSHub eliminates the $200/month X API cost entirely.
 
 ## 1. Prepare Repository
 
@@ -36,25 +38,47 @@ Push to GitHub:
 
 ```bash
 git add .
-git commit -m "Initial FallacySheriff setup"
+git commit -m "Deploy FallacySheriff"
 git push origin main
 ```
 
-## 2. Railway Setup
+## 2. Deploy RSSHub (if self-hosting)
 
-### Create Account
+### Create RSSHub Service on Railway
 
 1. Go to [railway.app](https://railway.app)
-2. Sign in with GitHub
+2. Create a new project
+3. Select "Deploy from GitHub repo"
+4. Search for `DIYgod/RSSHub` and deploy it
+5. Configure environment variables:
+
+| Variable | Value |
+|----------|-------|
+| `TWITTER_AUTH_TOKEN` | Your Twitter auth token from browser cookies |
+| Or: `TWITTER_USERNAME` | Your Twitter username |
+| Or: `TWITTER_PASSWORD` | Your Twitter password |
+| Or: `TWITTER_AUTHENTICATION_SECRET` | Your 2FA secret (if enabled) |
+
+### Note the RSSHub URL
+
+After deployment, Railway will provide a URL like:
+```
+https://rsshub-xxxx.railway.app
+```
+
+Save this URL for the next step.
+
+## 3. Deploy FallacySheriff Bot
 
 ### Create New Project
 
-1. Click "New Project"
-2. Select "Deploy from GitHub repo"
-3. Choose your `fallacysheriff` repository
-4. Railway will auto-detect Python and start building
+1. Go to [railway.app](https://railway.app)
+2. Click "New Project"
+3. Select "Deploy from GitHub repo"
+4. Choose your `fallacysheriff` repository
+5. Railway will auto-detect Python and start building
 
-## 3. Configure Environment Variables
+### Configure Environment Variables
 
 In Railway dashboard:
 
@@ -64,17 +88,17 @@ In Railway dashboard:
 
 | Variable | Value |
 |----------|-------|
-| `TWITTER_CONSUMER_KEY` | Your API Key |
-| `TWITTER_CONSUMER_SECRET` | Your API Secret |
-| `TWITTER_ACCESS_TOKEN` | Your Access Token |
-| `TWITTER_ACCESS_TOKEN_SECRET` | Your Access Token Secret |
-| `TWITTER_BEARER_TOKEN` | Your Bearer Token |
-| `BOT_USER_ID` | Your bot's numeric User ID |
+| `RSSHUB_URL` | `http://rsshub.railway.internal:1200` |
+| `RSSHUB_ACCESS_KEY` | (leave empty unless you have a custom key) |
+| `TWITTER_AUTH_TOKEN` | Your Twitter auth token |
+| `BOT_USERNAME` | `FallacySheriff` (or your bot's username) |
 | `GROK_API_KEY` | Your Grok API Key |
 | `POLL_INTERVAL_MINUTES` | `5` or `10` |
 | `DATABASE_PATH` | `/app/data/tweets.db` |
 
-## 4. Configure Persistent Storage
+**Important**: Use `http://rsshub.railway.internal:1200` for internal Railway networking. This connects to your RSSHub service running on the same Railway project.
+
+### Configure Persistent Storage
 
 SQLite needs persistent storage to survive deploys:
 
@@ -83,6 +107,14 @@ SQLite needs persistent storage to survive deploys:
 3. Add a volume:
    - Mount path: `/app/data`
    - Size: 1GB (plenty for tweet IDs)
+
+## 4. Link RSSHub and FallacySheriff Services
+
+If both services are in the same project, Railway automatically connects them via internal networking:
+
+- RSSHub service exposes: `http://rsshub.railway.internal:1200`
+- FallacySheriff connects via this internal URL
+- No external network calls needed between services
 
 ## 5. Verify Deployment
 
@@ -113,7 +145,7 @@ Should return:
 ### View Logs
 
 In Railway dashboard:
-1. Click on your service
+1. Click on your FallacySheriff service
 2. Go to "Deployments" tab
 3. Click on the latest deployment
 4. View logs
@@ -123,9 +155,17 @@ You should see:
 INFO: Initializing database...
 INFO: Starting scheduler with 5 minute interval...
 INFO: Running initial poll...
+INFO: Fetching mentions from RSSHub: http://rsshub.railway.internal:1200/twitter/keyword/@FallacySheriff
 INFO: FallacySheriff bot started
 INFO: Uvicorn running on http://0.0.0.0:PORT
 ```
+
+### Check RSSHub Logs
+
+Also check RSSHub service logs to ensure it's running:
+1. Click on RSSHub service
+2. Go to "Deployments" tab
+3. Look for RSSHub startup messages
 
 ## 6. Test the Bot
 
@@ -155,12 +195,9 @@ railway login
 railway link
 
 # Set variables
-railway variables set TWITTER_CONSUMER_KEY=your_key
-railway variables set TWITTER_CONSUMER_SECRET=your_secret
-railway variables set TWITTER_ACCESS_TOKEN=your_token
-railway variables set TWITTER_ACCESS_TOKEN_SECRET=your_token_secret
-railway variables set TWITTER_BEARER_TOKEN=your_bearer
-railway variables set BOT_USER_ID=your_bot_id
+railway variables set RSSHUB_URL=http://rsshub.railway.internal:1200
+railway variables set TWITTER_AUTH_TOKEN=your_token
+railway variables set BOT_USERNAME=FallacySheriff
 railway variables set GROK_API_KEY=your_grok_key
 railway variables set POLL_INTERVAL_MINUTES=5
 railway variables set DATABASE_PATH=/app/data/tweets.db
@@ -177,21 +214,36 @@ railway logs
 ### Bot Not Responding to Mentions
 
 1. Check Railway logs for polling activity
-2. Verify `BOT_USER_ID` is correct
-3. Ensure X API credentials are valid
-4. Check that mentions API is returning data
+2. Verify `BOT_USERNAME` is correct
+3. Check RSSHub logs for connection issues
+4. Ensure mentions are actually being posted to Twitter
 
-### Rate Limit Errors
+### "Connection refused" Error
 
-1. Increase `POLL_INTERVAL_MINUTES` (try 10 or 15)
-2. Check X Developer Portal for usage stats
-3. Consider upgrading X API tier if needed
+RSSHub service not responding:
+1. Verify RSSHub service is running (check its logs)
+2. Check that `RSSHUB_URL` uses correct internal URL: `http://rsshub.railway.internal:1200`
+3. Ensure both services are in the same Railway project
+
+### RSS Feed Parse Error
+
+1. Check RSSHub logs for authentication issues
+2. Verify `TWITTER_AUTH_TOKEN` is valid and not expired
+3. Try manually fetching from RSSHub endpoint
+4. Renew auth token if it expires
+
+### Mentions Not Being Found
+
+1. Check that mentions are being posted (reply with bot mention to any tweet)
+2. Verify `BOT_USERNAME` matches your actual bot account name
+3. Check database volume is mounted correctly
 
 ### Database Errors
 
 1. Ensure volume is mounted at `/app/data`
 2. Check file permissions
-3. Verify `DATABASE_PATH` environment variable
+3. Verify `DATABASE_PATH` environment variable is set
+4. Check Railway logs for write permission errors
 
 ### Scheduler Not Running
 
@@ -219,17 +271,20 @@ Use `/status` endpoint to monitor:
 
 For production use, consider:
 - Setting up alerts for error logs
-- Monitoring X API usage in Developer Portal
+- Monitoring RSSHub availability
 - Tracking Grok API costs
+- Setting up notifications for failed polls
 
 ## Scaling Considerations
 
-The polling architecture is simple and efficient:
+The RSS-based architecture is simple and efficient:
 - Single instance handles all polling
 - SQLite is sufficient for deduplication
 - No webhook complexity
+- RSSHub can be scaled independently if needed
 
-For higher volume, consider:
-- Reducing poll interval (watch rate limits)
-- Multiple bot accounts (separate deployments)
-- Upgrading to Pro tier for more API access
+For higher volume:
+- Reduce poll interval (but watch for RSS feed updates)
+- Use multiple bot accounts (separate deployments)
+- Upgrade RSSHub to managed service if needed
+- Monitor Grok API usage and costs

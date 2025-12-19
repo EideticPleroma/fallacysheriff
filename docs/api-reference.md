@@ -120,19 +120,21 @@ The bot automatically polls for mentions using APScheduler. This is not an HTTP 
 ### Polling Flow
 
 1. Scheduler triggers every `POLL_INTERVAL_MINUTES`
-2. Bot fetches mentions since `last_seen_id`
-3. Each mention is checked for trigger phrase
-4. Matching mentions trigger fallacy analysis
-5. Replies are posted to triggering tweets
-6. `last_seen_id` is updated
+2. Bot fetches RSS feed from RSSHub via `/twitter/keyword/@bot_username`
+3. Each mention is parsed from the RSS feed
+4. Mention text is checked for trigger phrase (`fallacyme`)
+5. Mentions are verified as replies to other tweets
+6. Matching mentions trigger fallacy analysis
+7. Replies are posted to triggering tweets
+8. Processed mentions are marked in database to avoid duplicates
 
 ### Trigger Criteria
 
 A mention is processed if ALL conditions are met:
 
-1. Tweet mentions `@FallacySheriff` (included in mentions API)
+1. RSS entry contains bot username (from RSSHub keyword search)
 2. Tweet contains `fallacyme` trigger phrase (case-insensitive)
-3. Tweet is a reply to another tweet
+3. Tweet is a reply to another tweet (extracted from RSS entry)
 4. Tweet hasn't been processed before (checked in SQLite)
 
 ---
@@ -140,6 +142,54 @@ A mention is processed if ALL conditions are met:
 ## Internal Functions
 
 These are internal Python functions, documented for developers.
+
+### RSS Client Functions
+
+Located in `app/rss_client.py`:
+
+```python
+def fetch_mentions_rss() -> list[RSSMention]:
+    """
+    Fetch mentions of the bot via RSSHub RSS feed.
+    
+    Uses the /twitter/keyword route to search for mentions of the bot.
+    RSSHub includes reply context in the RSS entries.
+    
+    Returns:
+        List of RSSMention objects for tweets mentioning the bot
+    """
+
+def fetch_tweet_chain(mention: RSSMention) -> tuple[str | None, str | None]:
+    """
+    Extract tweet chain context from RSS entry for analysis.
+    
+    Given a mention (user tagging @FallacySheriff), extracts context
+    that's embedded in the RSS entry.
+    
+    Args:
+        mention: The RSSMention that triggered the bot
+        
+    Returns:
+        (fallacy_tweet_text, original_tweet_text)
+        - fallacy_tweet_text: The text of the tweet being replied to
+        - original_tweet_text: None (not available from RSS entry alone)
+    """
+```
+
+### RSSMention Dataclass
+
+```python
+@dataclass
+class RSSMention:
+    """Represents a mention of the bot found in RSS feed."""
+    tweet_id: str                         # ID of the mention tweet
+    text: str                             # Text of the mention tweet
+    author_username: str                  # Who posted the mention
+    published: str                        # Publication timestamp
+    link: str                             # Link to the mention tweet
+    in_reply_to_tweet_id: str | None      # ID of parent tweet
+    in_reply_to_username: str | None      # Author of parent tweet
+```
 
 ### Database Functions
 
@@ -162,52 +212,37 @@ def set_last_seen_id(tweet_id: str, db_path: str | None = None) -> None:
     """Set the last seen tweet ID for polling."""
 ```
 
-### Twitter Functions
-
-Located in `app/twitter_client.py`:
-
-```python
-def get_mentions(since_id: str | None = None, client: tweepy.Client | None = None) -> list[dict]:
-    """Fetch recent mentions of the bot account."""
-
-def get_tweet_text(tweet_id: str, client: tweepy.Client | None = None) -> str | None:
-    """Fetch tweet text by ID."""
-
-def post_reply(reply_to_tweet_id: str, text: str, client: tweepy.Client | None = None) -> bool:
-    """Post a reply to a tweet."""
-```
-
 ### Grok Functions
 
 Located in `app/grok_client.py`:
 
 ```python
-def analyze_fallacy(tweet_text: str, client: OpenAI | None = None) -> str:
-    """Analyze tweet for logical fallacies."""
+def analyze_fallacy(tweet_text: str, context: str | None = None) -> str:
+    """Analyze tweet for logical fallacies using Grok."""
 ```
 
 ---
 
 ## Rate Limits
 
-### X API (Basic Tier)
+### RSSHub
 
-| Operation | Limit |
-|-----------|-------|
-| Read tweets | 15,000/month |
-| Write tweets | Included in tier |
-| Mentions endpoint | Part of read quota |
+- No hard rate limits for RSS feeds
+- Public RSSHub instances may have soft rate limiting
+- Self-hosted RSSHub on Railway has no practical limits for this use case
 
 ### Grok API
 
 - Check [console.x.ai](https://console.x.ai) for current limits
 - Typically generous for low-volume bots
+- Usage-based pricing
 
 ### Bot Self-Limiting
 
-- Duplicate tweets blocked via SQLite
+- Duplicate tweets blocked via SQLite deduplication
 - Failed requests logged but not retried
 - All tweets marked processed to prevent spam
+- Polling interval prevents excessive requests
 
 ---
 
@@ -220,13 +255,22 @@ def analyze_fallacy(tweet_text: str, client: OpenAI | None = None) -> str:
 | 200 | Success |
 | 500 | Internal server error |
 
+### Common RSS Errors
+
+| Error | Cause | Solution |
+|-------|-------|----------|
+| "Connection refused" | RSSHub not reachable | Check `RSSHUB_URL` and RSSHub service status |
+| "not well-formed" | Invalid RSS returned | Check RSSHub auth token validity |
+| "No mentions fetched" | No matching tweets found | Verify trigger phrase in mentions |
+
 ### Logging
 
 All operations are logged:
 
 ```
 INFO: Polling for new mentions...
-INFO: Fetched 3 new mentions
+INFO: Fetching mentions from RSSHub: http://rsshub.railway.internal:1200/twitter/keyword/@FallacySheriff
+INFO: Fetched 3 mentions from RSS
 INFO: Processing mention 1234567890, analyzing tweet 9876543210
 INFO: Analyzing parent tweet: This is clearly wrong...
 INFO: Successfully replied to tweet 1234567890
@@ -234,3 +278,63 @@ INFO: Updated last_seen_id to 1234567890
 ```
 
 View logs in Railway dashboard or local terminal.
+
+---
+
+## Configuration
+
+### Environment Variables
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `RSSHUB_URL` | Yes | - | URL of RSSHub instance |
+| `RSSHUB_ACCESS_KEY` | No | - | Optional access key for RSSHub |
+| `TWITTER_AUTH_TOKEN` | Yes | - | Twitter auth token for RSSHub |
+| `BOT_USERNAME` | Yes | - | Bot's Twitter username |
+| `GROK_API_KEY` | Yes | - | Grok API key from x.ai |
+| `POLL_INTERVAL_MINUTES` | No | 5 | Poll interval in minutes |
+| `DATABASE_PATH` | No | data/tweets.db | SQLite database path |
+
+---
+
+## Examples
+
+### Fetch Mentions and Analyze
+
+```python
+from app.rss_client import fetch_mentions_rss, fetch_tweet_chain
+from app.grok_client import analyze_fallacy
+
+# Get recent mentions
+mentions = fetch_mentions_rss()
+
+for mention in mentions:
+    # Extract tweet chain context
+    fallacy_context, _ = fetch_tweet_chain(mention)
+    
+    if fallacy_context:
+        # Analyze the tweet
+        analysis = analyze_fallacy(fallacy_context)
+        print(f"Tweet by {mention.author_username}: {analysis}")
+```
+
+### Manual Poll Trigger
+
+```bash
+# Trigger immediate poll
+curl -X POST http://localhost:8000/poll
+
+# Check current status
+curl http://localhost:8000/status
+```
+
+### Monitor Bot Health
+
+```bash
+# Create a monitoring script
+while true; do
+  status=$(curl -s http://localhost:8000/status)
+  echo "$(date): $status"
+  sleep 60
+done
+```
