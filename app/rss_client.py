@@ -184,14 +184,32 @@ def fetch_mentions_rss() -> list[RSSMention]:
     try:
         # Use urllib with timeout to prevent hanging indefinitely
         request = urllib.request.Request(url)
+        request.add_header('User-Agent', 'FallacySheriff/1.0')
+        
         with urllib.request.urlopen(request, timeout=RSS_REQUEST_TIMEOUT) as response:
+            status_code = response.getcode()
+            content_type = response.headers.get('Content-Type', 'unknown')
             feed_content = response.read()
+            
+            logger.info(
+                f"RSSHub response: status={status_code}, "
+                f"content_type={content_type}, "
+                f"content_length={len(feed_content)} bytes"
+            )
+            
+            # Log first 500 chars of response for debugging
+            content_preview = feed_content[:500].decode('utf-8', errors='replace')
+            logger.debug(f"Response preview: {content_preview}")
         
         feed = feedparser.parse(feed_content)
         
         if feed.bozo:
             logger.error(f"RSS feed parse error: {feed.bozo_exception}")
+            # Log the actual content that failed to parse
+            logger.error(f"Failed content preview: {feed_content[:1000].decode('utf-8', errors='replace')}")
             return []
+        
+        logger.info(f"Parsed feed: {len(feed.entries)} entries, feed title: {feed.feed.get('title', 'N/A')}")
         
         mentions = []
         for entry in feed.entries:
@@ -229,14 +247,23 @@ def fetch_mentions_rss() -> list[RSSMention]:
         logger.info(f"Fetched {len(mentions)} mentions from RSS")
         return mentions
         
+    except urllib.error.HTTPError as e:
+        # HTTP errors (4xx, 5xx) - log the response body for debugging
+        error_body = e.read().decode('utf-8', errors='replace')[:1000]
+        logger.error(
+            f"RSS fetch HTTP error: {e.code} {e.reason}\n"
+            f"URL: {url}\n"
+            f"Response body: {error_body}"
+        )
+        return []
     except urllib.error.URLError as e:
-        logger.error(f"RSS fetch failed (URL error): {e.reason}")
+        logger.error(f"RSS fetch failed (URL error): {e.reason}\nURL: {url}")
         return []
     except TimeoutError:
-        logger.error(f"RSS fetch timed out after {RSS_REQUEST_TIMEOUT}s")
+        logger.error(f"RSS fetch timed out after {RSS_REQUEST_TIMEOUT}s\nURL: {url}")
         return []
     except Exception as e:
-        logger.error(f"Error fetching RSS mentions: {e}")
+        logger.error(f"Error fetching RSS mentions: {e}\nURL: {url}", exc_info=True)
         return []
 
 
