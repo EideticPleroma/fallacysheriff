@@ -1,0 +1,3 @@
+# This directory stores the SQLite database file.
+# The .gitkeep file ensures the directory is tracked by git,
+# while the actual database file (tweets.db) is ignored.
