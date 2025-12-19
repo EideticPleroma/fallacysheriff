@@ -171,10 +171,9 @@ def fetch_mentions_rss() -> list[RSSMention]:
     """
     settings = get_settings()
     
-    # RSSHub route for keyword search with readable formatting
-    # routeParams: readable=1 for clean output, showAuthorInDesc=1 to include author info
-    route_params = "readable=1&showAuthorInDesc=1"
-    url = _build_rsshub_url(f"/twitter/keyword/@{settings.bot_username}/{route_params}")
+    # RSSHub route for keyword search
+    # Use simple route without routeParams to avoid URL encoding issues
+    url = _build_rsshub_url(f"/twitter/keyword/@{settings.bot_username}")
     
     logger.info(f"Fetching mentions from RSSHub: {url}")
     
