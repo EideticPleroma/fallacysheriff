@@ -5,6 +5,7 @@ Bypasses X API read restrictions by using RSSHub RSS feeds.
 
 import logging
 import re
+import urllib.request
 from dataclasses import dataclass
 from html import unescape
 from urllib.parse import urljoin
@@ -12,6 +13,9 @@ from urllib.parse import urljoin
 import feedparser
 
 from app.config import get_settings
+
+# Timeout for RSS requests (seconds)
+RSS_REQUEST_TIMEOUT = 15
 
 logger = logging.getLogger(__name__)
 
@@ -178,7 +182,12 @@ def fetch_mentions_rss() -> list[RSSMention]:
     logger.info(f"Fetching mentions from RSSHub: {url}")
     
     try:
-        feed = feedparser.parse(url)
+        # Use urllib with timeout to prevent hanging indefinitely
+        request = urllib.request.Request(url)
+        with urllib.request.urlopen(request, timeout=RSS_REQUEST_TIMEOUT) as response:
+            feed_content = response.read()
+        
+        feed = feedparser.parse(feed_content)
         
         if feed.bozo:
             logger.error(f"RSS feed parse error: {feed.bozo_exception}")
@@ -220,6 +229,12 @@ def fetch_mentions_rss() -> list[RSSMention]:
         logger.info(f"Fetched {len(mentions)} mentions from RSS")
         return mentions
         
+    except urllib.error.URLError as e:
+        logger.error(f"RSS fetch failed (URL error): {e.reason}")
+        return []
+    except TimeoutError:
+        logger.error(f"RSS fetch timed out after {RSS_REQUEST_TIMEOUT}s")
+        return []
     except Exception as e:
         logger.error(f"Error fetching RSS mentions: {e}")
         return []
