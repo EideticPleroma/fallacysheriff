@@ -8,6 +8,7 @@ from unittest.mock import patch, MagicMock, AsyncMock
 
 import pytest
 
+from app.grok_client import FallacyAnalysis
 from app.rss_client import RSSMention
 
 
@@ -65,7 +66,7 @@ class TestProcessMention:
     @patch("app.main.post_reply")
     @patch("app.main.is_processed")
     @patch("app.main.mark_processed")
-    async def test_process_valid_mention(
+    async def test_process_valid_mention_high_confidence(
         self,
         mock_mark_processed,
         mock_is_processed,
@@ -75,12 +76,17 @@ class TestProcessMention:
         sample_rss_mention,
         test_settings,
     ):
-        """Test processing a valid mention with trigger phrase."""
+        """Test processing a valid mention with high confidence fallacy."""
         from app.main import process_mention
 
         mock_is_processed.return_value = False
         mock_fetch_chain.return_value = ("Fallacy tweet text", "Original tweet context")
-        mock_analyze_fallacy.return_value = "Bandwagon fallacy detected"
+        mock_analyze_fallacy.return_value = FallacyAnalysis(
+            reply_text="Bandwagon fallacy detected",
+            confidence=95,
+            fallacy_detected=True,
+            fallacy_name="Bandwagon"
+        )
         mock_post_reply.return_value = True
 
         await process_mention(sample_rss_mention)
@@ -92,6 +98,40 @@ class TestProcessMention:
         )
         mock_post_reply.assert_called_once()
         mock_mark_processed.assert_called()
+
+    @pytest.mark.asyncio
+    @patch("app.main.fetch_tweet_chain")
+    @patch("app.main.analyze_fallacy")
+    @patch("app.main.post_reply")
+    @patch("app.main.is_processed")
+    @patch("app.main.mark_processed")
+    async def test_process_skips_low_confidence(
+        self,
+        mock_mark_processed,
+        mock_is_processed,
+        mock_post_reply,
+        mock_analyze_fallacy,
+        mock_fetch_chain,
+        sample_rss_mention,
+        test_settings,
+    ):
+        """Test that low confidence analysis doesn't post reply."""
+        from app.main import process_mention
+
+        mock_is_processed.return_value = False
+        mock_fetch_chain.return_value = ("Fallacy tweet text", "Original tweet context")
+        mock_analyze_fallacy.return_value = FallacyAnalysis(
+            reply_text="Maybe a fallacy?",
+            confidence=75,  # Below 90% threshold
+            fallacy_detected=True,
+            fallacy_name="Possible Fallacy"
+        )
+
+        await process_mention(sample_rss_mention)
+
+        mock_analyze_fallacy.assert_called_once()
+        mock_post_reply.assert_not_called()  # Should NOT post
+        mock_mark_processed.assert_called()  # But still mark processed
 
     @pytest.mark.asyncio
     @patch("app.main.post_reply")
@@ -209,7 +249,12 @@ class TestProcessMention:
 
         mock_is_processed.return_value = False
         mock_fetch_chain.return_value = ("Fallacy tweet text", None)  # No context
-        mock_analyze_fallacy.return_value = "Fallacy detected"
+        mock_analyze_fallacy.return_value = FallacyAnalysis(
+            reply_text="Fallacy detected",
+            confidence=92,
+            fallacy_detected=True,
+            fallacy_name="Test Fallacy"
+        )
         mock_post_reply.return_value = True
 
         await process_mention(sample_rss_mention)
@@ -219,6 +264,71 @@ class TestProcessMention:
             context_tweet=None
         )
         mock_post_reply.assert_called_once()
+
+    @pytest.mark.asyncio
+    @patch("app.main.fetch_tweet_chain")
+    @patch("app.main.analyze_fallacy")
+    @patch("app.main.post_reply")
+    @patch("app.main.is_processed")
+    @patch("app.main.mark_processed")
+    async def test_confidence_at_threshold_posts(
+        self,
+        mock_mark_processed,
+        mock_is_processed,
+        mock_post_reply,
+        mock_analyze_fallacy,
+        mock_fetch_chain,
+        sample_rss_mention,
+        test_settings,
+    ):
+        """Test that exactly 90% confidence posts reply."""
+        from app.main import process_mention
+
+        mock_is_processed.return_value = False
+        mock_fetch_chain.return_value = ("Fallacy tweet text", "Context")
+        mock_analyze_fallacy.return_value = FallacyAnalysis(
+            reply_text="Borderline fallacy",
+            confidence=90,  # Exactly at threshold
+            fallacy_detected=True,
+            fallacy_name="Test"
+        )
+        mock_post_reply.return_value = True
+
+        await process_mention(sample_rss_mention)
+
+        mock_post_reply.assert_called_once()  # Should post at exactly 90%
+
+    @pytest.mark.asyncio
+    @patch("app.main.fetch_tweet_chain")
+    @patch("app.main.analyze_fallacy")
+    @patch("app.main.post_reply")
+    @patch("app.main.is_processed")
+    @patch("app.main.mark_processed")
+    async def test_confidence_just_below_threshold_skips(
+        self,
+        mock_mark_processed,
+        mock_is_processed,
+        mock_post_reply,
+        mock_analyze_fallacy,
+        mock_fetch_chain,
+        sample_rss_mention,
+        test_settings,
+    ):
+        """Test that 89% confidence does not post reply."""
+        from app.main import process_mention
+
+        mock_is_processed.return_value = False
+        mock_fetch_chain.return_value = ("Fallacy tweet text", "Context")
+        mock_analyze_fallacy.return_value = FallacyAnalysis(
+            reply_text="Almost a fallacy",
+            confidence=89,  # Just below threshold
+            fallacy_detected=True,
+            fallacy_name="Test"
+        )
+
+        await process_mention(sample_rss_mention)
+
+        mock_post_reply.assert_not_called()  # Should NOT post at 89%
 
 
 class TestPollMentions:

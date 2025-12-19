@@ -30,6 +30,9 @@ class Settings(BaseSettings):
     # Polling configuration
     poll_interval_minutes: int = 5
 
+    # Confidence threshold (0-100) - only post if confidence >= this value
+    confidence_threshold: int = 90
+
     # App configuration
     database_path: str = "data/tweets.db"
 

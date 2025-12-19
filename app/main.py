@@ -146,10 +146,30 @@ async def process_mention(mention: RSSMention) -> None:
         f"Analyzing fallacy tweet: {fallacy_text[:100]}... "
         f"(context available: {bool(original_text)})"
     )
-    reply_text = analyze_fallacy(fallacy_text, context_tweet=original_text)
+    analysis = analyze_fallacy(fallacy_text, context_tweet=original_text)
+
+    # Get confidence threshold from settings
+    settings = get_settings()
+    threshold = settings.confidence_threshold
+
+    # Log the analysis result
+    logger.info(
+        f"Analysis result: confidence={analysis.confidence}%, "
+        f"fallacy_detected={analysis.fallacy_detected}, "
+        f"fallacy_name={analysis.fallacy_name}"
+    )
+
+    # Only post if confidence meets threshold
+    if analysis.confidence < threshold:
+        logger.info(
+            f"Confidence {analysis.confidence}% below threshold {threshold}%, "
+            f"not posting reply for tweet {tweet_id}"
+        )
+        mark_processed(tweet_id)
+        return
 
     # Post the reply to the mention tweet
-    success = post_reply(tweet_id, reply_text)
+    success = post_reply(tweet_id, analysis.reply_text)
 
     if success:
         logger.info(f"Successfully replied to tweet {tweet_id}")

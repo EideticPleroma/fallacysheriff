@@ -4,6 +4,7 @@ Pytest fixtures for FallacySheriff tests.
 Provides mock clients, test database, and FastAPI test client.
 """
 
+import json
 import os
 import pytest
 from unittest.mock import MagicMock, AsyncMock
@@ -76,10 +77,10 @@ def mock_twitter_client():
 
 @pytest.fixture
 def mock_grok_client():
-    """Create a mock OpenAI client for Grok API."""
+    """Create a mock OpenAI client for Grok API (legacy non-JSON response)."""
     mock_client = MagicMock()
 
-    # Mock chat completion response
+    # Mock chat completion response (legacy format)
     mock_message = MagicMock()
     mock_message.content = (
         "Bandwagon Fallacy\n"
@@ -87,6 +88,29 @@ def mock_grok_client():
         "Con: Popularity doesn't equal truth.\n"
         "More: yourlogicalfallacyis.com/bandwagon"
     )
+    mock_choice = MagicMock()
+    mock_choice.message = mock_message
+    mock_response = MagicMock()
+    mock_response.choices = [mock_choice]
+
+    mock_client.chat.completions.create.return_value = mock_response
+
+    return mock_client
+
+
+@pytest.fixture
+def mock_grok_client_json():
+    """Create a mock OpenAI client for Grok API with JSON response."""
+    mock_client = MagicMock()
+
+    # Mock chat completion response with JSON format
+    mock_message = MagicMock()
+    mock_message.content = json.dumps({
+        "confidence": 95,
+        "fallacy_detected": True,
+        "fallacy_name": "Bandwagon Fallacy",
+        "reply": "Bandwagon Fallacy\\nPro: Popular opinion can sometimes reflect wisdom.\\nCon: Popularity doesn't equal truth.\\nMore: yourlogicalfallacyis.com/bandwagon"
+    })
     mock_choice = MagicMock()
     mock_choice.message = mock_message
     mock_response = MagicMock()
